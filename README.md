@@ -1,4 +1,5 @@
-# Optimization-Based-Deconvolution
-Optimization-Based-Deconvolution
+# Deconvolutioin-Pytorch
 
-- Refer to demo.py for details of usage.
+### Pytorch implementation of optimization-based Deconvolution
+
+- Please refer to demo.py for the details of usage.
