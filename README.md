@@ -1,4 +1,4 @@
-# Deconvolutioin-Pytorch
+# Deconvolution-Pytorch
 
 ### Pytorch implementation of optimization-based Deconvolution
 
