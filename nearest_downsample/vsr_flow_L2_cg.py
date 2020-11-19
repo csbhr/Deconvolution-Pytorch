@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 
 def flip_kernel(kernel):
-    kernel_numpy = np.ascontiguousarray(kernel.cpu().numpy()[:, :, ::-1, ::-1])
+    kernel_numpy = np.ascontiguousarray(kernel.detach().cpu().numpy()[:, :, ::-1, ::-1])
     kernel_flip = torch.from_numpy(kernel_numpy).type_as(kernel)
     return kernel_flip
 
@@ -100,7 +100,7 @@ def warp(x, flo):
     return output
 
 
-def deconv_vsr_flow_L2_cg(y, kernel, adj_list, flow_list, x_init=None, scale=4, max_iter=80, gamma=0.01, wei=0.0001):
+def vsr_flow_L2_cg(y, kernel, adj_list, flow_list, x_init=None, scale=4, max_iter=80, gamma=0.01, wei=0.0001):
     kernel = flip_kernel(kernel)
     g1_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, -1], [0, 0, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)
     g2_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, 0], [0, -1, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)

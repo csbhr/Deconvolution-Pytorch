@@ -4,7 +4,7 @@ import numpy as np
 
 
 def flip_kernel(kernel):
-    kernel_numpy = np.ascontiguousarray(kernel.cpu().numpy()[:, :, ::-1, ::-1])
+    kernel_numpy = np.ascontiguousarray(kernel.detach().cpu().numpy()[:, :, ::-1, ::-1])
     kernel_flip = torch.from_numpy(kernel_numpy).type_as(kernel)
     return kernel_flip
 
@@ -28,13 +28,20 @@ def conv_func(x, kernel, padding='same'):
     return conv_result
 
 
-def dual_conv(x, kernel, mask=None):
+def dual_conv(x, kernel, mask=None, scale=1, psize=0):
     kernel_flip = flip_kernel(kernel)
 
     x = conv_func(x, kernel_flip, padding='same')
 
     if mask is not None:
         x = x * mask
+
+    if scale != 1:
+        x_down = x[:, :, psize:-psize:scale, psize:-psize:scale]  # downsample
+
+        x_up = torch.zeros(x.shape).type_as(x)  # upsample
+        x_up[:, :, psize:-psize:scale, psize:-psize:scale] = x_down
+        x = x_up
 
     x = conv_func(x, kernel, padding='same')
 
@@ -51,7 +58,7 @@ def inner_product(x1, x2):
     return re
 
 
-def deconv_L2_cg(y, kernel, max_iter=80, gamma=0.01):
+def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01):
     kernel = flip_kernel(kernel)
     g1_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, -1], [0, 0, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)
     g2_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, 0], [0, -1, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)
@@ -60,14 +67,18 @@ def deconv_L2_cg(y, kernel, max_iter=80, gamma=0.01):
     psize = ksize // 2
     assert ksize % 2 == 1, "only support odd kernel size!"
 
-    y = F.pad(y, (psize, psize, psize, psize), mode='replicate')
-    mask = torch.zeros_like(y).type_as(y)
+    b, c, h, w = y.size()
+    y_up = torch.zeros(b, c, h * scale, w * scale).type_as(y)
+    y_up[:, :, ::scale, ::scale] = y
+
+    y_up = F.pad(y_up, (psize, psize, psize, psize), mode='replicate')
+    mask = torch.zeros_like(y_up).type_as(y_up)
     mask[:, :, psize:-psize, psize:-psize] = 1.
 
-    b = conv_func(y * mask, kernel, padding='same')
+    b = conv_func(y_up * mask, kernel, padding='same')
 
-    x = y
-    Ax = dual_conv(x, kernel, mask)
+    x = y_up
+    Ax = dual_conv(x, kernel, mask, scale, psize)
     Ax = Ax + gamma * (dual_conv(x, g1_kernel) + dual_conv(x, g2_kernel))
 
     r = b - Ax
@@ -79,7 +90,7 @@ def deconv_L2_cg(y, kernel, max_iter=80, gamma=0.01):
             beta = rho / rho_1
             p = r + beta * p
 
-        Ap = dual_conv(p, kernel, mask)
+        Ap = dual_conv(p, kernel, mask, scale, psize)
         Ap = Ap + gamma * (dual_conv(p, g1_kernel) + dual_conv(p, g2_kernel))
 
         q = Ap

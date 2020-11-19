@@ -1,7 +1,7 @@
-from utils_fft import *
+from utils.utils_fft import *
 
 
-def deconv_L2_fft(y, k, gamma=0.02):
+def si_deblur_L2_fft(y, k, gamma=0.02):
     '''
     y: LR image, tensor, NxCxWxH
     k: kernel, tensor, Nx(1,3)xwxh
