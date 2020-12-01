@@ -4,6 +4,7 @@ import torch
 import cv2
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 
 def pre_process(img):
@@ -74,3 +75,60 @@ def get_lr_blurdown(img_gt, kernel, scale, dowsammple_method='bicubic'):
     blurdown = blurdown.astype('uint8')
 
     return blurdown
+
+
+def image_shift_numpy(img, offset_x=0., offset_y=0.):
+    img_tensor = torch.from_numpy(img.transpose(2, 0, 1)).unsqueeze(0).float()
+    B, C, H, W = img_tensor.size()
+
+    # init flow
+    flo = torch.ones(B, 2, H, W).type_as(img_tensor)
+    flo[:, 0, :, :] *= offset_x
+    flo[:, 1, :, :] *= offset_y
+
+    # mesh grid
+    xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
+    yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+    xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    grid = torch.cat((xx, yy), 1).float().type_as(img_tensor)
+    vgrid = Variable(grid) + flo
+
+    # scale grid to [-1,1]
+    vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
+    vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
+
+    # Interpolation
+    vgrid = vgrid.permute(0, 2, 3, 1)
+    output_tensor = F.grid_sample(img_tensor, vgrid, padding_mode='border')
+
+    output = output_tensor.round()[0].detach().numpy().transpose(1, 2, 0).astype(img.dtype)
+
+    return output
+
+
+def image_shift_tensor(img_tensor, offset_x=0., offset_y=0.):
+    B, C, H, W = img_tensor.size()
+
+    # init flow
+    flo = torch.ones(B, 2, H, W).type_as(img_tensor)
+    flo[:, 0, :, :] *= offset_x
+    flo[:, 1, :, :] *= offset_y
+
+    # mesh grid
+    xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
+    yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+    xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
+    grid = torch.cat((xx, yy), 1).float().type_as(img_tensor)
+    vgrid = Variable(grid) + flo
+
+    # scale grid to [-1,1]
+    vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
+    vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
+
+    # Interpolation
+    vgrid = vgrid.permute(0, 2, 3, 1)
+    output_tensor = F.grid_sample(img_tensor, vgrid, padding_mode='border')
+
+    return output_tensor
