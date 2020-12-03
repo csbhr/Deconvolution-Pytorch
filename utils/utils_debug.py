@@ -45,7 +45,7 @@ def PSNR(img1, img2):
     return 20 * math.log10(255.0 / math.sqrt(mse))
 
 
-def get_lr_blurdown(img_gt, kernel, scale, dowsammple_method='bicubic'):
+def get_lr_blurdown(img_gt, kernel, scale, dowsammple_method='nearest'):
     img_gt = np.array(img_gt).astype('float32')
     gt_tensor = torch.from_numpy(img_gt.transpose(2, 0, 1)).unsqueeze(0).float()
 
@@ -72,9 +72,10 @@ def get_lr_blurdown(img_gt, kernel, scale, dowsammple_method='bicubic'):
     else:
         raise Exception('Not support downsample method "{}"'.format(dowsammple_method))
 
+    blur = blur.astype('uint8')
     blurdown = blurdown.astype('uint8')
 
-    return blurdown
+    return blur, blurdown
 
 
 def image_shift_numpy(img, offset_x=0., offset_y=0.):

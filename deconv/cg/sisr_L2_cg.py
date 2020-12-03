@@ -1,34 +1,10 @@
 import torch.nn.functional as F
 import torch
 import numpy as np
+from deconv.cg.utils_cg import flip_kernel, conv_func, inner_product, downsample, upsample
 
 
-def flip_kernel(kernel):
-    kernel_numpy = np.ascontiguousarray(kernel.detach().cpu().numpy()[:, :, ::-1, ::-1])
-    kernel_flip = torch.from_numpy(kernel_numpy).type_as(kernel)
-    return kernel_flip
-
-
-def conv_func(x, kernel, padding='same'):
-    b, c, h, w = x.size()
-    _, _, _, ksize = kernel.size()
-
-    if padding == 'same':
-        padding = ksize // 2
-    elif padding == 'valid':
-        padding = 0
-    else:
-        raise Exception("not support padding flag!")
-
-    kernel_c = torch.zeros(c, c, ksize, ksize).type_as(kernel)
-    for i in range(c):
-        kernel_c[i, i, :, :] = kernel[0, 0, :, :]
-    conv_result = F.conv2d(x, kernel_c, bias=None, stride=1, padding=padding)
-
-    return conv_result
-
-
-def dual_conv(x, kernel, mask=None, scale=1, psize=0):
+def dual_conv(x, kernel, mask=None, scale=1, psize=0, sample_method='directly'):
     kernel_flip = flip_kernel(kernel)
 
     x = conv_func(x, kernel_flip, padding='same')
@@ -37,10 +13,10 @@ def dual_conv(x, kernel, mask=None, scale=1, psize=0):
         x = x * mask
 
     if scale != 1:
-        x_down = x[:, :, psize:-psize:scale, psize:-psize:scale]  # downsample
+        x_down = downsample(x[:, :, psize:-psize, psize:-psize], scale, method=sample_method)  # downsample
 
         x_up = torch.zeros(x.shape).type_as(x)  # upsample
-        x_up[:, :, psize:-psize:scale, psize:-psize:scale] = x_down
+        x_up[:, :, psize:-psize, psize:-psize] = upsample(x_down, scale, method=sample_method)
         x = x_up
 
     x = conv_func(x, kernel, padding='same')
@@ -48,17 +24,7 @@ def dual_conv(x, kernel, mask=None, scale=1, psize=0):
     return x
 
 
-def inner_product(x1, x2):
-    b, c, h, w = x1.size()
-    x1 = x1.view(b, -1)
-    x2 = x2.view(b, -1)
-    re = x1 * x2
-    re = torch.sum(re, dim=1)
-    re = re.view(b, 1, 1, 1)
-    return re
-
-
-def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01):
+def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01, sample_method='directly'):
     kernel = flip_kernel(kernel)
     g1_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, -1], [0, 0, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)
     g2_kernel = torch.from_numpy(np.array([[0, 0, 0], [0, 1, 0], [0, -1, 0]]).reshape((1, 1, 3, 3))).type_as(kernel)
@@ -67,9 +33,7 @@ def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01):
     psize = ksize // 2
     assert ksize % 2 == 1, "only support odd kernel size!"
 
-    b, c, h, w = y.size()
-    y_up = torch.zeros(b, c, h * scale, w * scale).type_as(y)
-    y_up[:, :, ::scale, ::scale] = y
+    y_up = upsample(y, scale, method=sample_method)
 
     y_up = F.pad(y_up, (psize, psize, psize, psize), mode='replicate')
     mask = torch.zeros_like(y_up).type_as(y_up)
@@ -78,7 +42,7 @@ def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01):
     b = conv_func(y_up * mask, kernel, padding='same')
 
     x = y_up
-    Ax = dual_conv(x, kernel, mask, scale, psize)
+    Ax = dual_conv(x, kernel, mask, scale, psize, sample_method=sample_method)
     Ax = Ax + gamma * (dual_conv(x, g1_kernel) + dual_conv(x, g2_kernel))
 
     r = b - Ax
@@ -90,7 +54,7 @@ def sisr_L2_cg(y, kernel, scale, max_iter=80, gamma=0.01):
             beta = rho / rho_1
             p = r + beta * p
 
-        Ap = dual_conv(p, kernel, mask, scale, psize)
+        Ap = dual_conv(p, kernel, mask, scale, psize, sample_method=sample_method)
         Ap = Ap + gamma * (dual_conv(p, g1_kernel) + dual_conv(p, g2_kernel))
 
         q = Ap
